@@ -1,6 +1,15 @@
-from prompt import string
+import prompt
 
 
 def welcome():
-    name = string("Введите ваше имя: ")
-    print(f"Привет, {name}!")
+    while True:
+        print("<command> exit - выйти из программы")
+        print("<command> help - справочная информация")
+
+        command = prompt.string("Введите команду: ")
+
+        if command == "exit":
+            break
+
+        if command == "help":
+            continue
