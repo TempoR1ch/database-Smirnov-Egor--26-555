@@ -42,6 +42,8 @@ def split_keyword(text, keyword):
 
 
 def parse_value(value):
+    """Преобразует текстовое значение в значение Python."""
+
     value = value.strip()
     if not value:
         raise ValueError("Пустое значение.")
