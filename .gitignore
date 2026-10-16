@@ -1,4 +1,10 @@
-.venv
+﻿# Виртуальное окружение и временные файлы
+.venv/
 dist/
+.ruff_cache/
 __pycache__/
-*.egg-info
+*.egg-info/
+
+# Локальные данные базы данных
+db_meta.json
+data/
