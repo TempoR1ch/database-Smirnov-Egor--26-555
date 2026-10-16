@@ -1,5 +1,18 @@
+from primitive_db.decorators import (
+    confirm_action,
+    create_cacher,
+    handle_db_errors,
+    log_time,
+)
+from primitive_db.utils import load_table_data
 
+select_cache = create_cacher()
+
+
+@handle_db_errors
 def create_table(metadata, table_name, columns):
+    """Создаёт таблицу и проверяет типы её столбцов."""
+
     if table_name in metadata:
         print(f'Ошибка: Таблица "{table_name}" уже существует.')
         return metadata
@@ -28,7 +41,11 @@ def create_table(metadata, table_name, columns):
     return metadata
 
 
+@handle_db_errors
+@confirm_action("удаление таблицы")
 def drop_table(metadata, table_name):
+    """Удаляет таблицу из метаданных."""
+
     if table_name not in metadata:
         print(f'Ошибка: Таблица "{table_name}" не существует.')
         return metadata
@@ -40,19 +57,24 @@ def drop_table(metadata, table_name):
     return metadata
 
 
+@handle_db_errors
 def list_tables(metadata):
+    """Выводит список таблиц."""
+
     for table_name in metadata:
         print(f"- {table_name}")
 
 
+@handle_db_errors
+@log_time
 def insert(metadata, table_name, values, table_data=None):
+    """Добавляет запись в таблицу."""
+
     if table_name not in metadata:
         print(f'Ошибка: Таблица "{table_name}" не существует.')
         return table_data if table_data is not None else []
 
     if table_data is None:
-        from primitive_db.utils import load_table_data
-
         table_data = load_table_data(table_name)
 
     columns = metadata[table_name]["columns"]
@@ -64,17 +86,20 @@ def insert(metadata, table_name, values, table_data=None):
 
     record = {}
 
+    valid_types = {
+        "int": int,
+        "str": str,
+        "bool": bool,
+    }
+
     for column, value in zip(user_columns, values):
         column_name, column_type = column.split(":", 1)
 
-        valid_types = {
-            "int": int,
-            "str": str,
-            "bool": bool,
-        }
-
         if type(value) is not valid_types[column_type]:
-            print(f"Некорректный тип значения для столбца {column_name}.")
+            print(
+                f"Некорректный тип значения "
+                f"для столбца {column_name}."
+            )
             return table_data
 
         record[column_name] = value
@@ -95,18 +120,33 @@ def insert(metadata, table_name, values, table_data=None):
     return table_data
 
 
+@handle_db_errors
+@log_time
 def select(table_data, where_clause=None):
-    if where_clause is None:
-        return table_data
+    """Возвращает записи, соответствующие условию."""
 
-    return [
-        row
-        for row in table_data
-        if all(row.get(key) == value for key, value in where_clause.items())
-    ]
+    cache_key = (repr(table_data), repr(where_clause))
+
+    def calculate_result():
+        if where_clause is None:
+            return table_data
+
+        return [
+            row
+            for row in table_data
+            if all(
+                row.get(key) == value
+                for key, value in where_clause.items()
+            )
+        ]
+
+    return select_cache(cache_key, calculate_result)
 
 
+@handle_db_errors
 def update(table_data, set_clause, where_clause):
+    """Обновляет подходящие записи."""
+
     updated_data = []
 
     for row in table_data:
@@ -121,7 +161,11 @@ def update(table_data, set_clause, where_clause):
     return updated_data
 
 
+@handle_db_errors
+@confirm_action("удаление записей")
 def delete(table_data, where_clause):
+    """Удаляет записи, соответствующие условию."""
+
     return [
         row
         for row in table_data
