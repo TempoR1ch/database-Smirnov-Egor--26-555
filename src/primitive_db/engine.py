@@ -252,7 +252,6 @@ def run():
             try:
                 values = parse_values(raw_values)
                 table_data = load_table_data(table_name)
-
                 new_data = insert(
                     metadata, table_name, values, table_data
                 )

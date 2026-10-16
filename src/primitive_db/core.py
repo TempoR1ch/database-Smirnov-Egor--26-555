@@ -1,3 +1,4 @@
+
 def create_table(metadata, table_name, columns):
     if table_name in metadata:
         print(f'Ошибка: Таблица "{table_name}" уже существует.')
@@ -17,7 +18,6 @@ def create_table(metadata, table_name, columns):
             return metadata
 
     columns = ["ID:int"] + columns
-
     metadata[table_name] = {"columns": columns}
 
     print(
@@ -45,11 +45,15 @@ def list_tables(metadata):
         print(f"- {table_name}")
 
 
-
-def insert(metadata, table_name, values, table_data):
+def insert(metadata, table_name, values, table_data=None):
     if table_name not in metadata:
         print(f'Ошибка: Таблица "{table_name}" не существует.')
-        return table_data
+        return table_data if table_data is not None else []
+
+    if table_data is None:
+        from primitive_db.utils import load_table_data
+
+        table_data = load_table_data(table_name)
 
     columns = metadata[table_name]["columns"]
     user_columns = columns[1:]
