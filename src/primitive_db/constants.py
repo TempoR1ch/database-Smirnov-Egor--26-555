@@ -1,4 +1,4 @@
-"""Shared application constants."""
+"""Общие константы приложения."""
 
 METADATA_FILE = "db_meta.json"
 DATA_DIRECTORY = "data"

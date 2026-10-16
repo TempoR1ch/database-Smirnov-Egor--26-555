@@ -40,7 +40,7 @@ def save_table_data(table_name, data):
 
 
 def delete_table_file(table_name):
-    """Delete the table JSON file if it exists."""
+    """Удаляет JSON-файл таблицы, если он существует."""
     filepath = os.path.join(DATA_DIRECTORY, f"{table_name}.json")
 
     if os.path.exists(filepath):

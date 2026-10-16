@@ -24,11 +24,11 @@ def split_keyword(text, keyword):
 
 
 def parse_value(value):
-    """Convert a textual value to a Python type."""
+    """Преобразует текстовое значение в тип Python."""
     value = value.strip()
 
     if not value:
-        raise ValueError("Empty value.")
+        raise ValueError("Пустое значение.")
 
     if value.lower() == "true":
         return True
@@ -38,22 +38,22 @@ def parse_value(value):
 
     if value[0] in ("'", '"'):
         if len(value) < 2 or value[-1] != value[0]:
-            raise ValueError("Unclosed or invalid string.")
+            raise ValueError("Незакрытая или некорректная строка.")
         return value[1:-1]
 
     if value[-1] in ("'", '"'):
-        raise ValueError("Invalid quoted string.")
+        raise ValueError("Некорректные кавычки в строке.")
 
     try:
         return int(value)
     except ValueError:
-        raise ValueError("String values must be enclosed in quotes.")
+        raise ValueError("Строковые значения должны быть заключены в кавычки.")
 
 
 def split_values(values):
-    """Split values by commas outside quotes."""
+    """Разделяет значения по запятым вне кавычек."""
     if not values.strip():
-        raise ValueError("Values cannot be empty.")
+        raise ValueError("Список значений не может быть пустым.")
 
     result = []
     current = []
@@ -69,25 +69,25 @@ def split_values(values):
         elif char == "," and quote is None:
             item = "".join(current).strip()
             if not item:
-                raise ValueError("Empty value between commas.")
+                raise ValueError("Пустое значение между запятыми.")
             result.append(item)
             current = []
         else:
             current.append(char)
 
     if quote is not None:
-        raise ValueError("Unclosed quote.")
+        raise ValueError("Незакрытая кавычка.")
 
     item = "".join(current).strip()
     if not item:
-        raise ValueError("Empty value after comma.")
+        raise ValueError("После запятой отсутствует значение.")
 
     result.append(item)
     return result
 
 
 def parse_values(values):
-    """Convert a textual list of values to Python values."""
+    """Преобразует текстовый список значений в значения Python."""
     return [parse_value(value) for value in split_values(values)]
 
 
@@ -121,7 +121,7 @@ def parse_condition(condition):
         index += 1
 
     if quote is not None:
-        raise ValueError("Unclosed quote.")
+        raise ValueError("Незакрытая кавычка.")
 
     parts.append("".join(current).strip())
 
