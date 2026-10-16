@@ -1,4 +1,3 @@
-
 import time
 
 
@@ -22,9 +21,7 @@ def confirm_action(action_name):
 
     def decorator(function):
         def wrapper(*args, **kwargs):
-            answer = input(
-                f'Вы уверены, что хотите выполнить "{action_name}"? [y/n]: '
-            )
+            answer = input(f'Вы уверены, что хотите выполнить "{action_name}"? [y/n]: ')
 
             if answer != "y":
                 print("Операция отменена.")
@@ -50,8 +47,7 @@ def log_time(function):
         finally:
             elapsed_time = time.monotonic() - start_time
             print(
-                f"Функция {function.__name__} выполнилась "
-                f"за {elapsed_time:.3f} секунд"
+                f"Функция {function.__name__} выполнилась за {elapsed_time:.3f} секунд"
             )
 
     wrapper.__name__ = function.__name__
@@ -70,4 +66,5 @@ def create_cacher():
 
         return cache[key]
 
+    cache_result.clear = cache.clear
     return cache_result

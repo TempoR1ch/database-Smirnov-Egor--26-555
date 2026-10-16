@@ -1,9 +1,10 @@
-import os
 import shlex
 
 from prettytable import PrettyTable
 
+from primitive_db.constants import METADATA_FILE
 from primitive_db.core import (
+    clear_select_cache,
     create_table,
     delete,
     drop_table,
@@ -12,14 +13,20 @@ from primitive_db.core import (
     select,
     update,
 )
+from primitive_db.parser import (
+    parse_condition,
+    parse_set_clause,
+    parse_values,
+    split_keyword,
+    validate_clause,
+)
 from primitive_db.utils import (
+    delete_table_file,
     load_metadata,
     load_table_data,
     save_metadata,
     save_table_data,
 )
-
-METADATA_FILE = "db_meta.json"
 
 
 def print_help():
@@ -42,133 +49,6 @@ exit - завершить работу
     )
 
 
-def split_keyword(text, keyword):
-    """Разделяет строку по ключевому слову вне кавычек."""
-    parts = shlex.split(text, posix=False)
-    result = []
-    current = []
-    found = False
-
-    for part in parts:
-        if part.lower() == keyword.lower() and not found:
-            result.append(" ".join(current))
-            current = []
-            found = True
-        else:
-            current.append(part)
-
-    if not found:
-        return None
-
-    result.append(" ".join(current))
-    return result
-
-
-def parse_value(value):
-    """Преобразует текстовое значение в Python-тип."""
-    value = value.strip()
-
-    if value.lower() == "true":
-        return True
-
-    if value.lower() == "false":
-        return False
-
-    try:
-        return int(value)
-    except ValueError:
-        return value
-
-def split_values(values):
-    """Разделяет значения по запятым вне кавычек."""
-    result = []
-    current = []
-    quote = None
-
-    for char in values:
-        if char in ("'", '"'):
-            if quote is None:
-                quote = char
-            elif quote == char:
-                quote = None
-            current.append(char)
-        elif char == "," and quote is None:
-            result.append("".join(current).strip())
-            current = []
-        else:
-            current.append(char)
-
-    if quote is not None:
-        raise ValueError("Не закрыты кавычки.")
-
-    if current or values.strip():
-        result.append("".join(current).strip())
-
-    return result
-
-
-def parse_values(values):
-    """Преобразует строку значений в список."""
-    return [parse_value(value) for value in split_values(values)]
-
-
-def parse_condition(condition):
-    """Разбирает условия сравнения через AND."""
-    conditions = []
-    parts = condition.split(" AND ")
-
-    for part in parts:
-        if "=" not in part:
-            raise ValueError("Некорректное условие.")
-
-        column, value = part.split("=", 1)
-        column = column.strip()
-        value = value.strip()
-
-        if not column or not value:
-            raise ValueError("Некорректное условие.")
-
-        conditions.append((column, parse_value(value)))
-
-    return dict(conditions)
-
-
-def parse_set_clause(clause):
-    """Разбирает значения для команды update."""
-    result = {}
-
-    for part in split_values(clause):
-        if "=" not in part:
-            raise ValueError("Некорректный SET.")
-
-        column, value = part.split("=", 1)
-        column = column.strip()
-        value = value.strip()
-
-        if not column or not value:
-            raise ValueError("Некорректный SET.")
-
-        result[column] = parse_value(value)
-
-    return result
-
-
-def validate_clause(metadata, table_name, clause, allow_id=True):
-    """Проверяет существование таблицы и указанных столбцов."""
-    if table_name not in metadata:
-        raise ValueError(f'Таблица "{table_name}" не существует.')
-
-    columns = metadata[table_name]["columns"]
-    column_names = [column.split(":", 1)[0] for column in columns]
-
-    for column in clause:
-        if column not in column_names:
-            raise ValueError(f'Столбец "{column}" не существует.')
-
-        if not allow_id and column == "ID":
-            raise ValueError("Нельзя изменять или задавать ID вручную.")
-
-
 def print_records(metadata, table_name, records):
     """Выводит записи таблицы в виде таблицы."""
     if table_name not in metadata:
@@ -180,10 +60,7 @@ def print_records(metadata, table_name, records):
         return
 
     table = PrettyTable()
-    columns = [
-        column.split(":", 1)[0]
-        for column in metadata[table_name]["columns"]
-    ]
+    columns = [column.split(":", 1)[0] for column in metadata[table_name]["columns"]]
     table.field_names = columns
 
     for record in records:
@@ -203,7 +80,7 @@ def run():
             if not command_line:
                 continue
 
-            args = shlex.split(command_line)
+            args = shlex.split(command_line, posix=False)
             command = args[0].lower()
 
             if command == "help":
@@ -250,10 +127,8 @@ def run():
 
                 if metadata != old_metadata:
                     save_metadata(METADATA_FILE, metadata)
-                    data_file = os.path.join("data", f"{table_name}.json")
-
-                    if os.path.exists(data_file):
-                        os.remove(data_file)
+                    delete_table_file(table_name)
+                    clear_select_cache()
 
             elif command == "insert":
                 if len(args) < 5 or args[1].lower() != "into":
@@ -268,8 +143,29 @@ def run():
 
                 values_text = " ".join(args[4:]).strip()
 
-                if not values_text.startswith("(") or not values_text.endswith(")"):
-                    print("Значения должны быть заключены в скобки.")
+                valid_values = values_text.startswith("(") and values_text.endswith(")")
+                quote = None
+                depth = 0
+
+                for index, char in enumerate(values_text):
+                    if char in ("'", '"'):
+                        if quote is None:
+                            quote = char
+                        elif quote == char:
+                            quote = None
+                    elif quote is None:
+                        if char == "(":
+                            depth += 1
+                        elif char == ")":
+                            depth -= 1
+                            if depth < 0 or (
+                                depth == 0 and index != len(values_text) - 1
+                            ):
+                                valid_values = False
+                                break
+
+                if not valid_values or quote is not None or depth != 0:
+                    print("Ошибка: значения должны быть заключены в скобки.")
                     continue
 
                 values = parse_values(values_text[1:-1])
@@ -278,6 +174,7 @@ def run():
 
                 if new_data is not None and new_data != table_data:
                     save_table_data(table_name, new_data)
+                    clear_select_cache()
 
             elif command == "select":
                 if len(args) < 3 or args[1].lower() != "from":
@@ -298,7 +195,7 @@ def run():
                     validate_clause(metadata, table_name, where_clause)
 
                 table_data = load_table_data(table_name)
-                records = select(table_data, where_clause)
+                records = select(table_data, where_clause, table_name)
 
                 if records is not None:
                     print_records(metadata, table_name, records)
@@ -329,16 +226,19 @@ def run():
                 validate_clause(metadata, table_name, where_clause)
 
                 table_data = load_table_data(table_name)
-                matching = select(table_data, where_clause)
+                matching = select(table_data, where_clause, table_name)
 
                 if not matching:
                     print("Записи не найдены.")
                     continue
 
-                new_data = update(table_data, set_clause, where_clause)
+                new_data = update(
+                    table_data, set_clause, where_clause, metadata, table_name
+                )
 
                 if new_data is not None:
                     save_table_data(table_name, new_data)
+                    clear_select_cache()
                     print("Записи успешно обновлены.")
 
             elif command == "delete":
@@ -357,7 +257,7 @@ def run():
                 validate_clause(metadata, table_name, where_clause)
 
                 table_data = load_table_data(table_name)
-                matching = select(table_data, where_clause)
+                matching = select(table_data, where_clause, table_name)
                 new_data = delete(table_data, where_clause)
 
                 if new_data is None:
@@ -365,6 +265,7 @@ def run():
 
                 if matching:
                     save_table_data(table_name, new_data)
+                    clear_select_cache()
                     for record in matching:
                         print(f"Удалена запись: {record}")
                 else:
