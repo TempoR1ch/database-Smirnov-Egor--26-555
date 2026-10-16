@@ -36,10 +36,10 @@ def print_help():
 ***Операции с данными***
 Функции:
 create_table <имя_таблицы> <столбец:тип> ... - создать таблицу
-drop_table <имя_таблицы> - удалить таблицу
 list_tables - вывести список таблиц
+drop_table <имя_таблицы> - удалить таблицу
 insert into <имя_таблицы> values (<значение1>, ...) - добавить запись
-select from <имя_таблицы> where <столбец> = <значение> - прочитать записи
+select from <имя_таблицы> where <условие> - прочитать записи
 update <имя_таблицы> set <столбец>=<значение> where <условие> - обновить записи
 delete from <имя_таблицы> where <условие> - удалить записи
 info <имя_таблицы> - информация о таблице
@@ -69,6 +69,46 @@ def print_records(metadata, table_name, records):
     print(table)
 
 
+def extract_insert_values(values_text):
+    """Проверяет скобки и извлекает одну группу значений insert."""
+    if not values_text.startswith("(") or not values_text.endswith(")"):
+        raise ValueError("Некорректное значение: ожидается одна группа в скобках.")
+
+    quote = None
+    depth = 0
+
+    for index, char in enumerate(values_text):
+        if char in ("'", '"'):
+            if quote is None:
+                quote = char
+            elif quote == char:
+                quote = None
+            continue
+
+        if quote is not None:
+            continue
+
+        if char == "(":
+            depth += 1
+
+            if depth > 1:
+                raise ValueError("Некорректное значение: лишние скобки.")
+
+        elif char == ")":
+            depth -= 1
+
+            if depth < 0:
+                raise ValueError("Некорректное значение: лишние скобки.")
+
+            if depth == 0 and index != len(values_text) - 1:
+                raise ValueError("Некорректное значение: лишние аргументы.")
+
+    if quote is not None or depth != 0:
+        raise ValueError("Некорректное значение: проверьте кавычки и скобки.")
+
+    return values_text[1:-1]
+
+
 def run():
     """Запускает интерактивную оболочку базы данных."""
     metadata = load_metadata(METADATA_FILE)
@@ -81,35 +121,52 @@ def run():
                 continue
 
             args = shlex.split(command_line, posix=False)
-            command = args[0].lower()
+            command = args[0]
 
             if command == "help":
+                if len(args) != 1:
+                    raise ValueError(
+                        "Некорректное значение: help не принимает аргументы."
+                    )
                 print_help()
 
             elif command == "exit":
+                if len(args) != 1:
+                    raise ValueError(
+                        "Некорректное значение: exit не принимает аргументы."
+                    )
                 print("Работа завершена.")
                 break
 
             elif command == "list_tables":
+                if len(args) != 1:
+                    raise ValueError(
+                        "Некорректное значение: list_tables не принимает аргументы."
+                    )
                 list_tables(metadata)
 
             elif command == "create_table":
                 if len(args) < 3:
-                    print("Укажите имя таблицы и хотя бы один столбец.")
-                    continue
+                    raise ValueError(
+                        "Некорректное значение: укажите таблицу и хотя бы один столбец."
+                    )
 
                 table_name = args[1]
                 columns = args[2:]
+                old_metadata = metadata.copy()
                 new_metadata = create_table(metadata, table_name, columns)
 
                 if new_metadata is not None:
                     metadata = new_metadata
-                    save_metadata(METADATA_FILE, metadata)
+
+                    if metadata != old_metadata:
+                        save_metadata(METADATA_FILE, metadata)
 
             elif command == "drop_table":
                 if len(args) != 2:
-                    print("Укажите имя таблицы.")
-                    continue
+                    raise ValueError(
+                        "Некорректное значение: drop_table принимает имя таблицы."
+                    )
 
                 table_name = args[1]
 
@@ -131,55 +188,28 @@ def run():
                     clear_select_cache()
 
             elif command == "insert":
-                if len(args) < 5 or args[1].lower() != "into":
-                    print("Использование: insert into <таблица> values (...)")
-                    continue
+                if len(args) < 5 or args[1] != "into" or args[3] != "values":
+                    raise ValueError(
+                        "Некорректное значение: используйте "
+                        "insert into <таблица> values (<значения>)."
+                    )
 
                 table_name = args[2]
-
-                if args[3].lower() != "values":
-                    print("Ожидается ключевое слово values.")
-                    continue
-
                 values_text = " ".join(args[4:]).strip()
-
-                valid_values = values_text.startswith("(") and values_text.endswith(")")
-                quote = None
-                depth = 0
-
-                for index, char in enumerate(values_text):
-                    if char in ("'", '"'):
-                        if quote is None:
-                            quote = char
-                        elif quote == char:
-                            quote = None
-                    elif quote is None:
-                        if char == "(":
-                            depth += 1
-                        elif char == ")":
-                            depth -= 1
-                            if depth < 0 or (
-                                depth == 0 and index != len(values_text) - 1
-                            ):
-                                valid_values = False
-                                break
-
-                if not valid_values or quote is not None or depth != 0:
-                    print("Ошибка: значения должны быть заключены в скобки.")
-                    continue
-
-                values = parse_values(values_text[1:-1])
+                values = parse_values(extract_insert_values(values_text))
                 table_data = load_table_data(table_name)
-                new_data = insert(metadata, table_name, values, table_data)
+                new_data = insert(metadata, table_name, table_data, values)
 
                 if new_data is not None and new_data != table_data:
                     save_table_data(table_name, new_data)
                     clear_select_cache()
 
             elif command == "select":
-                if len(args) < 3 or args[1].lower() != "from":
-                    print("Использование: select from <таблица> where <условие>")
-                    continue
+                if len(args) < 3 or args[1] != "from":
+                    raise ValueError(
+                        "Некорректное значение: используйте "
+                        "select from <таблица> [where <условие>]."
+                    )
 
                 table_name = args[2]
 
@@ -187,10 +217,23 @@ def run():
                     print(f'Ошибка: Таблица "{table_name}" не существует.')
                     continue
 
+                rest = " ".join(args[3:]).strip()
                 where_clause = None
-                where_parts = split_keyword(" ".join(args[3:]), "where")
 
-                if where_parts is not None:
+                if rest:
+                    where_parts = split_keyword(rest, "where")
+
+                    if where_parts is None or where_parts[0]:
+                        raise ValueError(
+                            "Некорректное значение: используйте where <условие>."
+                        )
+
+                    if not where_parts[1]:
+                        raise ValueError("Некорректное значение: условие where пустое.")
+
+                    if split_keyword(where_parts[1], "where") is not None:
+                        raise ValueError("Некорректное значение: лишнее where.")
+
                     where_clause = parse_condition(where_parts[1])
                     validate_clause(metadata, table_name, where_clause)
 
@@ -201,23 +244,30 @@ def run():
                     print_records(metadata, table_name, records)
 
             elif command == "update":
-                if len(args) < 2:
-                    print("Укажите имя таблицы.")
-                    continue
+                if len(args) < 6 or args[2] != "set":
+                    raise ValueError(
+                        "Некорректное значение: используйте "
+                        "update <таблица> set <столбец>=<значение> "
+                        "where <условие>."
+                    )
 
                 table_name = args[1]
-                parts = split_keyword(" ".join(args[2:]), "set")
-
-                if parts is None:
-                    print("Не найдено ключевое слово set.")
-                    continue
-
-                rest = parts[1]
+                rest = " ".join(args[3:]).strip()
                 set_parts = split_keyword(rest, "where")
 
-                if set_parts is None:
-                    print("Не найдено ключевое слово where.")
-                    continue
+                if set_parts is None or not set_parts[0] or not set_parts[1]:
+                    raise ValueError(
+                        "Некорректное значение: update требует set и where."
+                    )
+
+                if split_keyword(set_parts[0], "where") is not None:
+                    raise ValueError("Некорректное значение: лишнее where.")
+
+                if split_keyword(set_parts[0], "set") is not None:
+                    raise ValueError("Некорректное значение: лишнее set.")
+
+                if split_keyword(set_parts[1], "where") is not None:
+                    raise ValueError("Некорректное значение: лишнее where.")
 
                 set_clause = parse_set_clause(set_parts[0])
                 where_clause = parse_condition(set_parts[1])
@@ -242,44 +292,58 @@ def run():
                     print("Записи успешно обновлены.")
 
             elif command == "delete":
-                if len(args) < 4 or args[1].lower() != "from":
-                    print("Использование: delete from <таблица> where <условие>")
-                    continue
+                if len(args) < 5 or args[1] != "from":
+                    raise ValueError(
+                        "Некорректное значение: используйте "
+                        "delete from <таблица> where <условие>."
+                    )
 
                 table_name = args[2]
-                parts = split_keyword(" ".join(args[3:]), "where")
+                rest = " ".join(args[3:]).strip()
+                where_parts = split_keyword(rest, "where")
 
-                if parts is None:
-                    print("Не найдено ключевое слово where.")
-                    continue
+                if where_parts is None or where_parts[0]:
+                    raise ValueError(
+                        "Некорректное значение: используйте where <условие>."
+                    )
 
-                where_clause = parse_condition(parts[1])
+                if not where_parts[1]:
+                    raise ValueError("Некорректное значение: условие where пустое.")
+
+                if split_keyword(where_parts[1], "where") is not None:
+                    raise ValueError("Некорректное значение: лишнее where.")
+
+                where_clause = parse_condition(where_parts[1])
                 validate_clause(metadata, table_name, where_clause)
 
                 table_data = load_table_data(table_name)
                 matching = select(table_data, where_clause, table_name)
+
+                if not matching:
+                    print("Записи не найдены.")
+                    continue
+
                 new_data = delete(table_data, where_clause)
 
                 if new_data is None:
                     continue
 
-                if matching:
-                    save_table_data(table_name, new_data)
-                    clear_select_cache()
-                    for record in matching:
-                        print(f"Удалена запись: {record}")
-                else:
-                    print("Записи не найдены.")
+                save_table_data(table_name, new_data)
+                clear_select_cache()
+
+                for record in matching:
+                    print(f"Удалена запись: {record}")
 
             elif command == "info":
                 if len(args) != 2:
-                    print("Укажите имя таблицы.")
-                    continue
+                    raise ValueError(
+                        "Некорректное значение: info принимает имя таблицы."
+                    )
 
                 table_name = args[1]
 
                 if table_name not in metadata:
-                    print(f'Таблица "{table_name}" не существует.')
+                    print(f'Ошибка: Таблица "{table_name}" не существует.')
                     continue
 
                 print(f"Информация о таблице {table_name}:")

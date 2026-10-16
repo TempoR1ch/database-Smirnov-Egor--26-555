@@ -18,6 +18,17 @@ def clear_select_cache():
 def create_table(metadata, table_name, columns):
     """Создаёт таблицу и проверяет типы её столбцов."""
 
+    if (
+        not table_name
+        or not table_name.isascii()
+        or not table_name.replace("_", "").isalnum()
+    ):
+        print(
+            "Некорректное имя таблицы. "
+            "Используйте латинские буквы, цифры и подчёркивание."
+        )
+        return metadata
+
     if table_name in metadata:
         print(f'Ошибка: Таблица "{table_name}" уже существует.')
         return metadata
@@ -76,7 +87,7 @@ def list_tables(metadata):
 
 @handle_db_errors
 @log_time
-def insert(metadata, table_name, values, table_data):
+def insert(metadata, table_name, table_data, values):
     """Добавляет запись в таблицу."""
 
     if table_name not in metadata:
