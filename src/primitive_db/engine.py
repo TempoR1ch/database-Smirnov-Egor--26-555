@@ -289,7 +289,8 @@ def run():
                 if new_data is not None:
                     save_table_data(table_name, new_data)
                     clear_select_cache()
-                    print("Записи успешно обновлены.")
+                    for record in matching:
+                        print(f"Запись с ID={record['ID']} успешно обновлена.")
 
             elif command == "delete":
                 if len(args) < 5 or args[1] != "from":
@@ -332,7 +333,7 @@ def run():
                 clear_select_cache()
 
                 for record in matching:
-                    print(f"Удалена запись: {record}")
+                    print(f"Запись с ID={record['ID']} успешно удалена.")
 
             elif command == "info":
                 if len(args) != 2:

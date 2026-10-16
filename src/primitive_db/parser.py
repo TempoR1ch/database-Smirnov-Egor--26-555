@@ -42,32 +42,25 @@ def split_keyword(text, keyword):
 
 
 def parse_value(value):
-    """Преобразует текстовое значение в тип Python."""
-
     value = value.strip()
-
     if not value:
         raise ValueError("Пустое значение.")
-
-    if value.lower() == "true":
-        return True
-
-    if value.lower() == "false":
-        return False
 
     if value[0] in ("'", '"'):
         if len(value) < 2 or value[-1] != value[0]:
             raise ValueError("Незакрытая или некорректная строка.")
-
         inner = value[1:-1]
-
         if value[0] in inner:
             raise ValueError("Некорректные кавычки в строке.")
-
         return inner
 
     if value[-1] in ("'", '"'):
         raise ValueError("Некорректные кавычки в строке.")
+
+    if value.lower() == "true":
+        return True
+    if value.lower() == "false":
+        return False
 
     try:
         return int(value)
