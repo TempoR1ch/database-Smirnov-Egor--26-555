@@ -1,8 +1,5 @@
-
-import ast
-import re
+import os
 import shlex
-from pathlib import Path
 
 from prettytable import PrettyTable
 
@@ -55,6 +52,18 @@ def print_help():
     print("<command> exit - выход из программы\n")
 
 
+def split_keyword(text, keyword):
+    position = text.lower().find(keyword.lower())
+
+    if position == -1:
+        return None, None
+
+    before = text[:position].strip()
+    after = text[position + len(keyword):].strip()
+
+    return before, after
+
+
 def parse_value(value):
     value = value.strip()
 
@@ -65,44 +74,83 @@ def parse_value(value):
         return False
 
     if value.startswith(("'", '"')):
-        result = ast.literal_eval(value)
+        if len(value) < 2 or value[-1] != value[0]:
+            raise ValueError("Некорректная строка в кавычках.")
 
-        if not isinstance(result, str):
-            raise ValueError("Ожидалась строка в кавычках.")
+        parsed = shlex.split(value)
 
-        return result
+        if len(parsed) != 1:
+            raise ValueError("Некорректная строка.")
 
-    return int(value)
+        return parsed[0]
+
+    try:
+        return int(value)
+    except ValueError as error:
+        raise ValueError(
+            f"Некорректное значение: {value}"
+        ) from error
 
 
 def split_values(values):
-    return re.findall(
-        r"""'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|[^,]+""",
-        values,
-    )
+    parts = []
+    current = []
+    quote = None
+    escaped = False
+
+    for char in values:
+        if escaped:
+            current.append(char)
+            escaped = False
+            continue
+
+        if char == "\\" and quote is not None:
+            current.append(char)
+            escaped = True
+            continue
+
+        if char in ("'", '"'):
+            if quote is None:
+                quote = char
+            elif quote == char:
+                quote = None
+
+            current.append(char)
+            continue
+
+        if char == "," and quote is None:
+            parts.append("".join(current).strip())
+            current = []
+        else:
+            current.append(char)
+
+    if quote is not None:
+        raise ValueError("Не закрыты кавычки.")
+
+    parts.append("".join(current).strip())
+
+    return parts
 
 
 def parse_values(values):
+    if not values.strip():
+        raise ValueError("Не указаны значения.")
+
     parts = split_values(values)
 
-    if not parts or any(not part.strip() for part in parts):
+    if any(not part for part in parts):
         raise ValueError("Некорректный список значений.")
 
     return [parse_value(part) for part in parts]
 
 
 def parse_condition(condition):
-    parts = condition.split("=", 1)
+    column, separator, value = condition.partition("=")
 
-    if len(parts) != 2:
+    if not separator or not column.strip() or not value.strip():
         raise ValueError("Некорректное условие.")
 
-    column = parts[0].strip()
-
-    if not column:
-        raise ValueError("Не указано имя столбца.")
-
-    return {column: parse_value(parts[1])}
+    return {column.strip(): parse_value(value)}
 
 
 def parse_set_clause(clause):
@@ -174,7 +222,7 @@ def run():
         metadata = load_metadata(METADATA_FILE)
 
         print_help()
-        user_input = input(">>>Введите команду: ")
+        user_input = input(">>>Введите команду: ").strip()
 
         try:
             args = shlex.split(user_input)
@@ -185,7 +233,7 @@ def run():
         if not args:
             continue
 
-        command = args[0]
+        command = args[0].lower()
 
         if command == "exit":
             if len(args) != 1:
@@ -233,24 +281,31 @@ def run():
             if metadata != old_metadata:
                 save_metadata(METADATA_FILE, metadata)
 
-                data_file = Path("data") / f"{table_name}.json"
-                data_file.unlink(missing_ok=True)
+                data_file = os.path.join("data", f"{table_name}.json")
+
+                if os.path.exists(data_file):
+                    os.remove(data_file)
 
         elif command == "insert":
-            match = re.fullmatch(
-                r"insert\s+into\s+(\w+)\s+values\s*\((.*)\)",
-                user_input.strip(),
-                re.IGNORECASE,
-            )
+            rest = user_input[len(args[0]):].strip()
 
-            if not match:
+            if not rest.lower().startswith("into "):
                 print("Некорректный формат команды insert.")
                 continue
 
-            table_name, raw_values = match.groups()
+            rest = rest[5:].strip()
+            table_name, raw_values = split_keyword(rest, " values ")
+
+            if not table_name or raw_values is None:
+                print("Некорректный формат команды insert.")
+                continue
+
+            if not raw_values.startswith("(") or not raw_values.endswith(")"):
+                print("Некорректный формат команды insert.")
+                continue
 
             try:
-                values = parse_values(raw_values)
+                values = parse_values(raw_values[1:-1])
                 table_data = load_table_data(table_name)
                 new_data = insert(
                     metadata, table_name, values, table_data
@@ -263,21 +318,20 @@ def run():
                 print(f"Некорректное значение: {error}")
 
         elif command == "select":
-            match = re.fullmatch(
-                r"select\s+from\s+(\w+)"
-                r"(?:\s+where\s+(.+))?",
-                user_input.strip(),
-                re.IGNORECASE,
-            )
+            rest = user_input[len(args[0]):].strip()
 
-            if not match:
+            if not rest.lower().startswith("from "):
                 print("Некорректный формат команды select.")
                 continue
 
-            table_name, raw_condition = match.groups()
+            rest = rest[5:].strip()
+            table_name, raw_condition = split_keyword(rest, " where ")
+
+            if raw_condition is None:
+                table_name = rest
 
             try:
-                if table_name not in metadata:
+                if not table_name or table_name not in metadata:
                     raise ValueError(
                         f'Таблица "{table_name}" не существует.'
                     )
@@ -299,20 +353,21 @@ def run():
                 print(f"Ошибка: {error}")
 
         elif command == "update":
-            match = re.fullmatch(
-                r"update\s+(\w+)\s+set\s+(.+?)\s+where\s+(.+)",
-                user_input.strip(),
-                re.IGNORECASE,
-            )
+            rest = user_input[len(args[0]):].strip()
+            table_name, rest = split_keyword(rest, " set ")
 
-            if not match:
+            if rest is None:
                 print("Некорректный формат команды update.")
                 continue
 
-            table_name, raw_set, raw_condition = match.groups()
+            raw_set, raw_condition = split_keyword(rest, " where ")
+
+            if raw_condition is None:
+                print("Некорректный формат команды update.")
+                continue
 
             try:
-                if table_name not in metadata:
+                if not table_name or table_name not in metadata:
                     raise ValueError(
                         f'Таблица "{table_name}" не существует.'
                     )
@@ -344,20 +399,21 @@ def run():
                 print(f"Ошибка: {error}")
 
         elif command == "delete":
-            match = re.fullmatch(
-                r"delete\s+from\s+(\w+)\s+where\s+(.+)",
-                user_input.strip(),
-                re.IGNORECASE,
-            )
+            rest = user_input[len(args[0]):].strip()
 
-            if not match:
+            if not rest.lower().startswith("from "):
                 print("Некорректный формат команды delete.")
                 continue
 
-            table_name, raw_condition = match.groups()
+            rest = rest[5:].strip()
+            table_name, raw_condition = split_keyword(rest, " where ")
+
+            if raw_condition is None:
+                print("Некорректный формат команды delete.")
+                continue
 
             try:
-                if table_name not in metadata:
+                if not table_name or table_name not in metadata:
                     raise ValueError(
                         f'Таблица "{table_name}" не существует.'
                     )
